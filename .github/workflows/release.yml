@@ -17,13 +17,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Extract version from tag
+        id: tag_version
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION from tag: $TAG_NAME"
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 17
           server-id: github
-          settings-path: ${{ github.workspace }}
+
+      - name: Update version in pom.xml
+        run: |
+          VERSION="${{ steps.tag_version.outputs.version }}"
+          python3 << EOF
+          import re
+          with open('pom.xml', 'r') as f:
+              content = f.read()
+          # Replace the project version (between artifactId and packaging)
+          content = re.sub(
+              r'(<artifactId>lib-version</artifactId>\s*)<version>[^<]+</version>',
+              r'\1<version>' + VERSION + '</version>',
+              content
+          )
+          with open('pom.xml', 'w') as f:
+              f.write(content)
+          print(f"Updated pom.xml version to: {VERSION}")
+          EOF
 
       - name: Build with Maven
         run: mvn -B clean package
