@@ -1,0 +1,59 @@
+name: Pre-release (lib-version)
+
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prerelease:
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java + Maven server
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          server-id: github
+          settings-path: ${{ github.workspace }}
+
+      - name: Compute pre-release version
+        shell: bash
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}"
+
+          VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
+          BASE_VER="${VER%-SNAPSHOT}"
+
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          BRANCH_SAFE=$(echo "$BRANCH" | tr '/._' '---' | tr -cd '[:alnum:]-')
+
+          TS=$(date -u +'%y%m%d-%H%M%S')
+
+          PRE="${REPO}-${BASE_VER}-${BRANCH_SAFE}-${TS}"
+          echo "PRE_VERSION=$PRE" >> "$GITHUB_ENV"
+
+      - name: Set pom.xml to pre-release version
+        run: |
+          mvn -B versions:set -DnewVersion="${PRE_VERSION}"
+          mvn -B versions:commit
+
+      - name: Deploy pre-release to GitHub Packages
+        run: |
+          mvn -B -s "${GITHUB_WORKSPACE}/settings.xml" deploy -DskipTests
+
+      - name: Reset pom.xml
+        run: git checkout -- pom.xml
