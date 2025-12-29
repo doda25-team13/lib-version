@@ -52,6 +52,9 @@ jobs:
           mvn -B versions:commit
 
       - name: Deploy pre-release to GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: |
           mvn -B -s "${GITHUB_WORKSPACE}/settings.xml" deploy -DskipTests
 
