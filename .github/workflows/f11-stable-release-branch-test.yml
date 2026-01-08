@@ -1,12 +1,8 @@
 name: F11 Stable Release – Branch Test (no deploy, no push)
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag_prefix:
-        description: "Prefix for the created tag (keeps it from being a real release tag)"
-        required: false
-        default: "test-v"
+  push:
+    branches: [f11-releases]
 
 permissions:
   contents: write
@@ -53,7 +49,7 @@ jobs:
           RELEASE_VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
           echo "Stable version would be: $RELEASE_VERSION"
 
-          TAG="${{ inputs.tag_prefix }}${RELEASE_VERSION}"
+          TAG="test-v${RELEASE_VERSION}"
           echo "Test tag would be: $TAG"
 
           # Create release commit + tag locally (NOT pushed)
