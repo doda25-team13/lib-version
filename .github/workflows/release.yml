@@ -38,7 +38,7 @@ name: Stable Release (lib-version) F11
 
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    branches: [main]
 
 permissions:
   contents: write
@@ -46,6 +46,7 @@ permissions:
 
 jobs:
   release:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
 
     steps:
@@ -53,7 +54,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: main
 
       - name: Set up Java + Maven server
         uses: actions/setup-java@v4
@@ -64,16 +64,44 @@ jobs:
           server-id: github
           settings-path: ${{ github.workspace }}
 
-      - name: Read version from tag
+      - name: Configure Git user
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Prepare stable version (commit + tag)
         shell: bash
         run: |
-          REL="${GITHUB_REF#refs/tags/v}"
-          echo "RELEASE_VERSION=$REL" >> "$GITHUB_ENV"
+          set -euo pipefail
 
-      - name: Set pom.xml to stable version
-        run: |
-          mvn -B versions:set -DnewVersion="${RELEASE_VERSION}"
+          CURRENT=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
+          echo "Current pom.xml version: $CURRENT"
+
+          # Only release if main is on a SNAPSHOT version
+          case "$CURRENT" in
+            *-SNAPSHOT) ;;
+            *)
+              echo "Not a SNAPSHOT version ($CURRENT) — skipping release."
+              exit 0
+              ;;
+          esac
+
+          mvn -B versions:set -DremoveSnapshot -DgenerateBackupPoms=false
           mvn -B versions:commit
+
+          RELEASE_VERSION=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
+          echo "Release version: $RELEASE_VERSION"
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
+
+          # Fail if tag already exists
+          if git rev-parse "v$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Tag v$RELEASE_VERSION already exists"
+            exit 1
+          fi
+
+          git add pom.xml
+          git commit -m "chore: release v$RELEASE_VERSION [skip ci]"
+          git tag "v$RELEASE_VERSION"
 
       - name: Deploy stable release
         env:
@@ -81,26 +109,26 @@ jobs:
         run: |
           mvn -B -s "${GITHUB_WORKSPACE}/settings.xml" deploy -DskipTests
 
-      - name: Compute next SNAPSHOT (patch + 1)
+      - name: Bump to next SNAPSHOT (patch + 1)
         shell: bash
         run: |
+          set -euo pipefail
+
           IFS='.' read -r MA MI PA <<< "${RELEASE_VERSION}"
           NEXT_PA=$((PA + 1))
-          NEXT="${MA}.${MI}.${NEXT_PA}-SNAPSHOT"
-          echo "NEXT_SNAPSHOT=$NEXT" >> "$GITHUB_ENV"
+          NEXT_SNAPSHOT="${MA}.${MI}.${NEXT_PA}-SNAPSHOT"
+          echo "Next SNAPSHOT: $NEXT_SNAPSHOT"
+          echo "NEXT_SNAPSHOT=$NEXT_SNAPSHOT" >> "$GITHUB_ENV"
 
-      - name: Bump pom.xml to next SNAPSHOT
-        run: |
-          mvn -B versions:set -DnewVersion="${NEXT_SNAPSHOT}"
+          mvn -B versions:set -DnewVersion="${NEXT_SNAPSHOT}" -DgenerateBackupPoms=false
           mvn -B versions:commit
 
-      - name: Commit and push SNAPSHOT bump to main
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
           git add pom.xml
-          git commit -m "chore: bump version to ${NEXT_SNAPSHOT}"
-          git push origin HEAD:main
+          git commit -m "chore: bump version to ${NEXT_SNAPSHOT} [skip ci]"
+
+      - name: Push commits and tag
+        run: |
+          git push --atomic origin main "v${RELEASE_VERSION}"
+
+
 
