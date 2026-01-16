@@ -1,44 +1,18 @@
-# name: Release lib-version F2
-
-# on:
-#   push:
-#     tags:
-#       - "v*"
-
-# jobs:
-#   build-and-publish:
-#     runs-on: ubuntu-latest
-
-#     permissions:
-#       contents: write
-#       packages: write
-
-#     steps:
-#       - name: Checkout repository
-#         uses: actions/checkout@v4
-
-#       - name: Set up JDK
-#         uses: actions/setup-java@v4
-#         with:
-#           distribution: temurin
-#           java-version: 21
-#           cache: 'maven'
-#           server-id: github
-#           settings-path: ${{ github.workspace }}
-
-#       - name: Build with Maven
-#         run: mvn -B clean package
-
-#       - name: Publish to GitHub Packages
-#         env:
-#           GITHUB_TOKEN: ${{ github.token }}
-#         run: mvn -B deploy -s $GITHUB_WORKSPACE/settings.xml -DskipTests
-
 name: Stable Release (lib-version) F11
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Next version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
@@ -110,19 +84,47 @@ jobs:
         run: |
           mvn -B -s "${GITHUB_WORKSPACE}/settings.xml" deploy -DskipTests
 
-      - name: Bump to next SNAPSHOT (patch + 1)
+      - name: Bump to next SNAPSHOT
         shell: bash
         run: |
           set -euo pipefail
+          
+          BUMP_TYPE="${{ github.event.inputs.bump_type }}"
+          
+          # Default to 'patch' if triggered automatically (push event)
+          if [ -z "$BUMP_TYPE" ]; then
+            BUMP_TYPE="patch"
+          fi
+          
+          echo "Bumping version using type: $BUMP_TYPE"
 
-          IFS='.' read -r MA MI PA <<< "${RELEASE_VERSION}"
-          NEXT_PA=$((PA + 1))
-          NEXT_SNAPSHOT="${MA}.${MI}.${NEXT_PA}-SNAPSHOT"
-          echo "Next SNAPSHOT: $NEXT_SNAPSHOT"
-          echo "NEXT_SNAPSHOT=$NEXT_SNAPSHOT" >> "$GITHUB_ENV"
+          # Use build-helper-maven-plugin to calculate the next version
+          case "$BUMP_TYPE" in
+            major)
+              mvn build-helper:parse-version versions:set \
+                -DnewVersion=\${parsedVersion.nextMajorVersion}.0.0-SNAPSHOT \
+                -DgenerateBackupPoms=false
+              ;;
+            minor)
+              mvn build-helper:parse-version versions:set \
+                -DnewVersion=\${parsedVersion.majorVersion}.\${parsedVersion.nextMinorVersion}.0-SNAPSHOT \
+                -DgenerateBackupPoms=false
+              ;;
+            patch)
+              mvn build-helper:parse-version versions:set \
+                -DnewVersion=\${parsedVersion.majorVersion}.\${parsedVersion.minorVersion}.\${parsedVersion.nextIncrementalVersion}-SNAPSHOT \
+                -DgenerateBackupPoms=false
+              ;;
+            *)
+              echo "Unknown bump type: $BUMP_TYPE"
+              exit 1
+              ;;
+          esac
 
-          mvn -B versions:set -DnewVersion="${NEXT_SNAPSHOT}" -DgenerateBackupPoms=false
           mvn -B versions:commit
+          
+          NEXT_SNAPSHOT=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
+          echo "Next SNAPSHOT version: $NEXT_SNAPSHOT"
 
           git add pom.xml
           git commit -m "chore: bump version to ${NEXT_SNAPSHOT} [skip ci]"
