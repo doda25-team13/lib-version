@@ -35,8 +35,6 @@ jobs:
       - name: Compute pre-release version
         shell: bash
         run: |
-          REPO="${GITHUB_REPOSITORY#*/}"
-
           VER=$(mvn -q -DforceStdout help:evaluate -Dexpression=project.version)
           BASE_VER="${VER%-SNAPSHOT}"
 
@@ -45,7 +43,7 @@ jobs:
 
           TS=$(date -u +'%y%m%d-%H%M%S')
 
-          PRE="${REPO}-${BASE_VER}-${BRANCH_SAFE}-${TS}"
+          PRE="${BASE_VER}-${BRANCH_SAFE}-${TS}"
           echo "PRE_VERSION=$PRE" >> "$GITHUB_ENV"
 
       - name: Set pom.xml to pre-release version
